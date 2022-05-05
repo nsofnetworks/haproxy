@@ -3381,6 +3381,7 @@ int cfg_parse_resolvers(const char *file, int linenum, char **args, int kwm)
 		}
 
 		err_code |= resolvers_new(&curr_resolvers, args[1], file, linenum);
+		ha_warning("curr_resolvers: %p (%s)\n", curr_resolvers, curr_resolvers->id);
 		if (err_code & ERR_ALERT) {
 			ha_alert("parsing [%s:%d] : out of memory.\n", file, linenum);
 			goto out;
@@ -3628,6 +3629,25 @@ out:
 	free(warnmsg);
 	return err_code;
 }
+
+/* try to create a "default" resolvers section which uses "/etc/resolv.conf"
+ *
+ * This function is opportunistic and does not try to display errors or warnings.
+ */
+int resolvers_create_default()
+{
+	int err_code = 0;
+
+	if (find_resolvers_by_id("default"))
+	    return 0;
+
+	err_code |= resolvers_new(&curr_resolvers, "default", "<internal>", 0);
+	if (!(err_code & ERR_CODE))
+		err_code |= parse_resolve_conf(NULL, NULL);
+
+	return 0;
+}
+
 int cfg_post_parse_resolvers()
 {
 	int err_code = 0;
