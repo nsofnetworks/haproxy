@@ -85,7 +85,7 @@ void task_kill(struct task *t)
 			 * Note: that's a task so it must be accounted for as such. Pick
 			 * the task's first thread for the job.
 			 */
-			thr = my_ffsl(t->thread_mask) - 1;
+			thr = t->tid >= 0 ? t->tid : tid;
 
 			/* Beware: tasks that have never run don't have their ->list empty yet! */
 			MT_LIST_APPEND(&ha_thread_ctx[thr].shared_tasklet_list,
@@ -192,9 +192,10 @@ void __tasklet_wakeup_on(struct tasklet *tl, int thr)
 void __task_wakeup(struct task *t)
 {
 	struct eb_root *root = &th_ctx->rqueue;
+	int thr __maybe_unused = t->tid >= 0 ? t->tid : tid;
 
 #ifdef USE_THREAD
-	if (t->thread_mask != tid_bit && global.nbthread != 1) {
+	if (thr != tid) {
 		root = &rqueue;
 
 		_HA_ATOMIC_INC(&grq_total);
@@ -224,7 +225,7 @@ void __task_wakeup(struct task *t)
 	eb32sc_insert(root, &t->rq, t->thread_mask);
 
 #ifdef USE_THREAD
-	if (root == &rqueue) {
+	if (thr != tid) {
 		_HA_ATOMIC_OR(&t->state, TASK_GLOBAL);
 		HA_SPIN_UNLOCK(TASK_RQ_LOCK, &rq_lock);
 
@@ -235,9 +236,8 @@ void __task_wakeup(struct task *t)
 		     (t->thread_mask & all_threads_mask))) {
 			unsigned long m = (t->thread_mask & all_threads_mask) &~ tid_bit;
 
-			m = (m & (m - 1)) ^ m; // keep lowest bit set
 			_HA_ATOMIC_AND(&sleeping_thread_mask, ~m);
-			wake_thread(my_ffsl(m) - 1);
+			wake_thread(thr);
 		}
 	}
 #endif
