@@ -3328,7 +3328,7 @@ static int stats_dump_full_strm_to_buffer(struct stconn *sc, struct stream *strm
 			              conn->flags,
 			              conn_fd(conn),
 			              conn_fd(conn) >= 0 ? fdtab[conn->handle.fd].state : 0,
-			              conn_fd(conn) >= 0 ? !!(fdtab[conn->handle.fd].update_mask & tid_bit) : 0,
+			              conn_fd(conn) >= 0 ? !!(fdtab[conn->handle.fd].update_mask & ti->ltid_bit) : 0,
 				      conn_fd(conn) >= 0 ? fdtab[conn->handle.fd].thread_mask: 0);
 
 		}
@@ -3367,7 +3367,7 @@ static int stats_dump_full_strm_to_buffer(struct stconn *sc, struct stream *strm
 			              conn->flags,
 			              conn_fd(conn),
 			              conn_fd(conn) >= 0 ? fdtab[conn->handle.fd].state : 0,
-			              conn_fd(conn) >= 0 ? !!(fdtab[conn->handle.fd].update_mask & tid_bit) : 0,
+			              conn_fd(conn) >= 0 ? !!(fdtab[conn->handle.fd].update_mask & ti->ltid_bit) : 0,
 				      conn_fd(conn) >= 0 ? fdtab[conn->handle.fd].thread_mask: 0);
 
 		}
