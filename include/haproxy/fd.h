@@ -321,6 +321,38 @@ static forceinline int fd_tgid(int fd)
 	return _HA_ATOMIC_LOAD(&fdtab[fd].refc_tgid) & 0xFFFF;
 }
 
+/* Release a tgid previously taken by fd_take_tgid() */
+static forceinline void fd_drop_tgid(int fd)
+{
+	HA_ATOMIC_SUB(&fdtab[fd].refc_tgid, 0x10000);
+}
+
+/* Try to grab a reference to the FD's TGID, but only if it matches the
+ * requested one (i.e. it succeeds with TGID refcnt held, or fails). Note that
+ * a TGID of zero indicates the FD was closed, thus also fails. It returns
+ * zero on success, or non-zero on failure. The caller must then release it
+ * using fd_drop_tgid() in case of success.
+ */
+static inline uint fd_take_tgid(int fd, uint desired_tgid)
+{
+	uint old;
+	uint tgrp;
+
+	/* read the old value. We know that most of the time here the value
+	 * will have the desired tgid with a null refcount, so we can read
+	 * using a CAS guessing this value. If we succeed there's nothing
+	 * else to do otherwise we know what to restart from.
+	 */
+	old = desired_tgid;
+	while (!_HA_ATOMIC_CAS(&fdtab[fd].refc_tgid, &old, old + 0x10000)) {
+		tgrp = old & 0xffff;
+		tgrp -= desired_tgid; // differ if closed or reassigned
+		if (tgrp)
+			return tgrp;
+	}
+	return 0;
+}
+
 /* remove tid_bit from the fd's running mask and returns the bits that remain
  * after the atomic operation.
  */
