@@ -489,6 +489,17 @@ int fd_update_events(int fd, uint evts)
 		 * bits).
 		 */
 		do {
+			if (unlikely(fd_take_tgid(fd, ti->tgid) != 0)) {
+				/* the FD changed to another tgid, we can't safely
+				 * check it anymore. The bits in the masks are not
+				 * ours anymore and we're not allowed to touch them.
+				 * Ours have already been cleared and the FD was
+				 * closed in between so we can safely leave now.
+				 */
+				activity[tid].poll_drop_fd++;
+				return FD_UPDT_CLOSED;
+			}
+
 			rmask = _HA_ATOMIC_LOAD(&fdtab[fd].running_mask);
 			tmask = _HA_ATOMIC_LOAD(&fdtab[fd].thread_mask);
 		} while (rmask & ~tmask);
@@ -496,9 +507,13 @@ int fd_update_events(int fd, uint evts)
 		if (!(tmask & tid_bit)) {
 			/* a takeover has started */
 			activity[tid].poll_skip_fd++;
+			fd_drop_tgid(fd);
 			return FD_UPDT_MIGRATED;
 		}
 	} while (!HA_ATOMIC_CAS(&fdtab[fd].running_mask, &rmask, rmask | tid_bit));
+
+	/* with running we're safe now, we can drop the reference */
+	fd_drop_tgid(fd);
 
 	locked = (tmask != tid_bit);
 
