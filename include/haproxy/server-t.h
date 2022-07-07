@@ -161,6 +161,7 @@ enum srv_initaddr {
 #define SRV_PP_V2_AUTHORITY     0x0080   /* proxy protocol version 2 with authority */
 #define SRV_PP_V2_CRC32C        0x0100   /* proxy protocol version 2 with crc32c */
 #define SRV_PP_V2_UNIQUE_ID     0x0200   /* proxy protocol version 2 with unique ID */
+#define SRV_PP_AL_V1            0x0400   /* proxy protocol agentless version 1 */
 
 /* function which act on servers need to return various errors */
 #define SRV_STATUS_OK       0   /* everything is OK. */
@@ -212,6 +213,13 @@ struct srv_per_thread {
 	struct eb_root avail_conns;             /* Connections in use, but with still new streams available */
 };
 
+struct agentless_pp_settings {
+	char *org_id;
+	char *org_shortname;
+	char *tunnel_id;
+	char *src_ext_ip;
+};
+
 /* Configure the protocol selection for websocket */
 enum __attribute__((__packed__)) srv_ws_mode {
 	SRV_WS_AUTO = 0,
@@ -228,6 +236,7 @@ struct server {
 	signed char use_ssl;		        /* ssl enabled (1: on, 0: disabled, -1 forced off)  */
 	unsigned int flags;                     /* server flags (SRV_F_*) */
 	unsigned int pp_opts;                   /* proxy protocol options (SRV_PP_*) */
+	struct agentless_pp_settings pp_al;     /* settings for agentless proxy protocol */
 	struct list global_list;                /* attach point in the global servers_list */
 	struct server *next;
 	int cklen;				/* the len of the cookie, to speed up checks */

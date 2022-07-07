@@ -1393,6 +1393,49 @@ static int srv_parse_weight(char **args, int *cur_arg, struct proxy *px, struct 
 	return 0;
 }
 
+/* Parse the "send-proxy-al-v1" server keyword */
+static int srv_parse_send_proxy_al_v1(char **args, int *cur_arg,
+                                      struct proxy *curproxy, struct server *newsrv, char **err)
+{
+	return srv_enable_pp_flags(newsrv, SRV_PP_AL_V1);
+}
+
+/* Parse the "proxy-al-org-id" server keyword */
+static int srv_parse_proxy_al_org_id(char **args, int *cur_arg,
+                                     struct proxy *curproxy, struct server *newsrv, char **err)
+{
+	free(newsrv->pp_al.org_id);
+	newsrv->pp_al.org_id = strdup(args[*cur_arg + 1]);
+	return 0;
+}
+
+/* Parse the "proxy-al-org-shortname" server keyword */
+static int srv_parse_proxy_al_org_shortname(char **args, int *cur_arg,
+                                            struct proxy *curproxy, struct server *newsrv, char **err)
+{
+	free(newsrv->pp_al.org_shortname);
+	newsrv->pp_al.org_shortname = strdup(args[*cur_arg + 1]);
+	return 0;
+}
+
+/* Parse the "proxy-al-tunnel-id" server keyword */
+static int srv_parse_proxy_al_tunnel_id(char **args, int *cur_arg,
+                                        struct proxy *curproxy, struct server *newsrv, char **err)
+{
+	free(newsrv->pp_al.tunnel_id);
+	newsrv->pp_al.tunnel_id = strdup(args[*cur_arg + 1]);
+	return 0;
+}
+
+/* Parse the "proxy-al-src-ext-ip" server keyword */
+static int srv_parse_proxy_al_src_ext_ip(char **args, int *cur_arg,
+                                         struct proxy *curproxy, struct server *newsrv, char **err)
+{
+	free(newsrv->pp_al.src_ext_ip);
+	newsrv->pp_al.src_ext_ip = strdup(args[*cur_arg + 1]);
+	return 0;
+}
+
 /* Shutdown all connections of a server. The caller must pass a termination
  * code in <why>, which must be one of SF_ERR_* indicating the reason for the
  * shutdown.
@@ -1799,6 +1842,14 @@ static struct srv_kw_list srv_kws = { "ALL", { }, {
 	{ "socks4",              srv_parse_socks4,              1,  1,  0 }, /* Set the socks4 proxy of the server*/
 	{ "usesrc",              srv_parse_usesrc,              0,  1,  1 }, /* safe-guard against usesrc without preceding <source> keyword */
 	{ "weight",              srv_parse_weight,              1,  1,  1 }, /* Set the load-balancing weight */
+
+	/* Agentless Proxy Protocol v1 */
+	{ "send-proxy-al-v1",       srv_parse_send_proxy_al_v1,       0,  1,  1 }, /* Enforce use of AGENTLESS PROXY V1 protocol */
+	{ "proxy-al-org-id",        srv_parse_proxy_al_org_id,        1,  1,  1 }, /* Set AGENTLESS PROXY org_id */
+	{ "proxy-al-org-shortname", srv_parse_proxy_al_org_shortname, 1,  1,  1 }, /* Set AGENTLESS PROXY org_shortname */
+	{ "proxy-al-tunnel-id",     srv_parse_proxy_al_tunnel_id,     1,  1,  1 }, /* Set AGENTLESS PROXY tunnel_id */
+	{ "proxy-al-src-ext-ip",    srv_parse_proxy_al_src_ext_ip,    1,  1,  1 }, /* Set AGENTLESS PROXY src_ext_ip */
+
 	{ NULL, NULL, 0 },
 }};
 
@@ -2158,6 +2209,22 @@ int srv_prepare_for_resolution(struct server *srv, const char *hostname)
 	return -1;
 }
 
+static inline void agentless_pp_settings_cpy(struct agentless_pp_settings *dst,
+		const struct agentless_pp_settings *src)
+{
+	if (src->org_id != NULL)
+		dst->org_id = strdup(src->org_id);
+
+	if (src->org_shortname != NULL)
+		dst->org_shortname = strdup(src->org_shortname);
+
+	if (src->tunnel_id != NULL)
+		dst->tunnel_id = strdup(src->tunnel_id);
+
+	if (src->src_ext_ip != NULL)
+		dst->src_ext_ip = strdup(src->src_ext_ip);
+}
+
 /*
  * Copy <src> server settings to <srv> server allocating
  * everything needed.
@@ -2173,6 +2240,9 @@ void srv_settings_cpy(struct server *srv, const struct server *src, int srv_tmpl
 {
 	/* Connection source settings copy */
 	srv_conn_src_cpy(srv, src);
+
+	/* Agentless settings copy */
+	agentless_pp_settings_cpy(&srv->pp_al, &src->pp_al);
 
 	if (srv_tmpl) {
 		srv->addr = src->addr;
@@ -2339,6 +2409,15 @@ void srv_take(struct server *srv)
 	HA_ATOMIC_INC(&srv->refcount);
 }
 
+static inline void agentless_pp_settings_drop(struct agentless_pp_settings *pp_al)
+{
+	free(pp_al->org_id);
+	free(pp_al->org_shortname);
+	free(pp_al->src_ext_ip);
+	free(pp_al->tunnel_id);
+	memset(pp_al, 0, sizeof(*pp_al));
+}
+
 /* Deallocate a server <srv> and its member. <srv> must be allocated. For
  * dynamic servers, its refcount is decremented first. The free operations are
  * conducted only if the refcount is nul, unless the process is stopping.
@@ -2365,6 +2444,8 @@ struct server *srv_drop(struct server *srv)
 
 	task_destroy(srv->warmup);
 	task_destroy(srv->srvrq_check);
+
+	agentless_pp_settings_drop(&srv->pp_al);
 
 	free(srv->id);
 	free(srv->cookie);
