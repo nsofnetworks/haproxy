@@ -2012,6 +2012,37 @@ static int make_proxy_line_v2(char *buf, int buf_len, struct server *srv, struct
 	return ret;
 }
 
+static inline char *str_or_null(char *str)
+{
+	return str ? str : "null";
+}
+
+static int make_al_proxy_line_v1(char *buf, int buf_len, struct server *srv,
+                                 const struct sockaddr_storage *src, const struct sockaddr_storage *dst)
+{
+	int ret = 0, ret2 = 0;
+
+	if (buf_len < 2)
+		return 0;
+
+	buf[0] = 'A';
+	buf[1] = 'L';
+
+	/* ALPROXY proto src_addr dst_addr src_port dst_port\r\n */
+	ret = make_proxy_line_v1(buf + 2, buf_len - 2, src, dst);
+	if (ret == 0)
+		return 0;
+
+	/* ALPROXY proto src_addr dst_addr src_port dst_port org_id org_shortname tunnel_id src_ext_ip\r\n */
+	ret2 = snprintf(buf + ret, buf_len - ret, " %s %s %s %s\r\n",
+			str_or_null(srv->pp_al.org_id), str_or_null(srv->pp_al.org_shortname),
+			str_or_null(srv->pp_al.tunnel_id), str_or_null(srv->pp_al.src_ext_ip));
+	if (ret2 >= buf_len - ret)
+		return 0;
+
+	return ret + ret2;
+}
+
 /* Note: <remote> is explicitly allowed to be NULL */
 int make_proxy_line(char *buf, int buf_len, struct server *srv, struct connection *remote, struct stream *strm)
 {
@@ -2033,8 +2064,12 @@ int make_proxy_line(char *buf, int buf_len, struct server *srv, struct connectio
 			dst = conn_dst(remote);
 		}
 
-		if (src && dst)
-			ret = make_proxy_line_v1(buf, buf_len, src, dst);
+		if (src && dst) {
+			if (srv && (srv->pp_opts & SRV_PP_AL_V1))
+				ret = make_al_proxy_line_v1(buf, buf_len, srv, src, dst);
+			else
+				ret = make_proxy_line_v1(buf, buf_len, src, dst);
+		}
 		else
 			ret = make_proxy_line_v1(buf, buf_len, NULL, NULL);
 	}
