@@ -100,9 +100,9 @@ enum {
 	 */
 	CO_FL_WAIT_ROOM     = 0x00000800,  /* data sink is full */
 
-	/* These flags are used to report whether the from/to addresses are set or not */
-	/* unused: 0x00001000 */
-	/* unused: 0x00002000 */
+	CO_FL_FORWARD_PROXY_SEND = 0x00001000, /* handshaking with upstream Forward Proxy, going to send CONNECT */
+	CO_FL_FORWARD_PROXY_RECV = 0x00002000, /* handshaking with upstream Forward Proxy, waiting for CONNECT response */
+	CO_FL_FORWARD_PROXY = CO_FL_FORWARD_PROXY_SEND | CO_FL_FORWARD_PROXY_RECV,
 
 	CO_FL_EARLY_SSL_HS  = 0x00004000,  /* We have early data pending, don't start SSL handshake yet */
 	CO_FL_EARLY_DATA    = 0x00008000,  /* At least some of the data are early data */
@@ -133,7 +133,7 @@ enum {
 	CO_FL_ACCEPT_CIP    = 0x04000000,  /* receive a valid NetScaler Client IP header */
 
 	/* below we have all handshake flags grouped into one */
-	CO_FL_HANDSHAKE     = CO_FL_SEND_PROXY | CO_FL_ACCEPT_PROXY | CO_FL_ACCEPT_CIP | CO_FL_SOCKS4_SEND | CO_FL_SOCKS4_RECV,
+	CO_FL_HANDSHAKE     = CO_FL_SEND_PROXY | CO_FL_ACCEPT_PROXY | CO_FL_ACCEPT_CIP | CO_FL_SOCKS4_SEND | CO_FL_SOCKS4_RECV | CO_FL_FORWARD_PROXY,
 	CO_FL_WAIT_XPRT     = CO_FL_WAIT_L4_CONN | CO_FL_HANDSHAKE | CO_FL_WAIT_L6_CONN,
 
 	CO_FL_SSL_WAIT_HS   = 0x08000000,  /* wait for an SSL handshake to complete */
