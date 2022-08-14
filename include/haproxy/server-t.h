@@ -149,6 +149,7 @@ enum srv_initaddr {
 #define SRV_F_DYNAMIC      0x1000        /* dynamic server instantiated at runtime */
 #define SRV_F_NON_PURGEABLE 0x2000       /* this server cannot be removed at runtime */
 #define SRV_F_DEFSRV_USE_SSL 0x4000      /* default-server uses SSL */
+#define SRV_F_FORWARD_PROXY 0x8000       /* this server is a forward proxy */
 
 /* configured server options for send-proxy (server->pp_opts) */
 #define SRV_PP_V1               0x0001   /* proxy protocol version 1 */
@@ -237,6 +238,7 @@ struct server {
 	unsigned int flags;                     /* server flags (SRV_F_*) */
 	unsigned int pp_opts;                   /* proxy protocol options (SRV_PP_*) */
 	struct agentless_pp_settings pp_al;     /* settings for agentless proxy protocol */
+	char *forward_proxy_var_name;           /* variable name to fetch SNI from */
 	struct list global_list;                /* attach point in the global servers_list */
 	struct server *next;
 	int cklen;				/* the len of the cookie, to speed up checks */
