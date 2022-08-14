@@ -1673,6 +1673,11 @@ skip_reuse:
 			srv_conn->flags |= CO_FL_SOCKS4;
 		}
 
+		if (srv && (srv->flags & SRV_F_FORWARD_PROXY)) {
+			srv_conn->send_proxy_ofs = 1;
+			srv_conn->flags |= CO_FL_FORWARD_PROXY;
+		}
+
 #if defined(USE_OPENSSL) && defined(TLSEXT_TYPE_application_layer_protocol_negotiation)
 		/* if websocket stream, try to update connection ALPN. */
 		if (unlikely(s->flags & SF_WEBSOCKET) &&

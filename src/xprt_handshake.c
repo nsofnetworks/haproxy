@@ -77,6 +77,20 @@ struct task *xprt_handshake_io_cb(struct task *t, void *bctx, unsigned int state
 			goto out;
 		}
 
+	if (conn->flags & CO_FL_FORWARD_PROXY_SEND)
+		if (!conn_send_forward_proxy_request(conn)) {
+			ctx->xprt->subscribe(conn, ctx->xprt_ctx, SUB_RETRY_SEND,
+			                     &ctx->wait_event);
+			goto out;
+		}
+
+	if (conn->flags & CO_FL_FORWARD_PROXY_RECV)
+		if (!conn_recv_forward_proxy_response(conn)) {
+			ctx->xprt->subscribe(conn, ctx->xprt_ctx, SUB_RETRY_RECV,
+			                     &ctx->wait_event);
+			goto out;
+		}
+
 out:
 	/* Wake the stream if we're done with the handshake, or we have a
 	 * connection error
