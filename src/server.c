@@ -1436,6 +1436,44 @@ static int srv_parse_proxy_al_src_ext_ip(char **args, int *cur_arg,
 	return 0;
 }
 
+/* Parse the "forward-proxy" server keyword */
+static int srv_parse_forward_proxy(char **args, int *cur_arg,
+                                   struct proxy *curproxy, struct server *newsrv, char **err)
+{
+	static const char prefix[] = "sess."; /* only session variables supported */
+	const size_t prefix_len = sizeof(prefix) - 1; /* exclude terminating null */
+
+	const char *arg = args[*cur_arg + 1];
+
+	if (!arg || !*arg)
+		goto missing_arg;
+
+	/* does it have the expected prefix? */
+	if (strncmp(arg, prefix, prefix_len))
+		goto invalid_arg;
+
+	/* does it have a valid suffix? */
+	if (strlen(arg) == prefix_len)
+		goto invalid_arg;
+
+	free(newsrv->forward_proxy_var_name);
+	newsrv->forward_proxy_var_name = strdup(arg);
+	newsrv->flags |= SRV_F_FORWARD_PROXY;
+
+	return 0;
+
+ missing_arg:
+	memprintf(err, "'%s' expects sess.<var_name> as argument.\n",
+	          args[*cur_arg]);
+	goto err;
+ invalid_arg:
+	memprintf(err, "'%s' expects sess.<var_name>: received '%s'.\n",
+	          args[*cur_arg], arg);
+	goto err;
+ err:
+	return ERR_ALERT | ERR_FATAL;
+}
+
 /* Shutdown all connections of a server. The caller must pass a termination
  * code in <why>, which must be one of SF_ERR_* indicating the reason for the
  * shutdown.
@@ -1849,6 +1887,7 @@ static struct srv_kw_list srv_kws = { "ALL", { }, {
 	{ "proxy-al-org-shortname", srv_parse_proxy_al_org_shortname, 1,  1,  1 }, /* Set AGENTLESS PROXY org_shortname */
 	{ "proxy-al-tunnel-id",     srv_parse_proxy_al_tunnel_id,     1,  1,  1 }, /* Set AGENTLESS PROXY tunnel_id */
 	{ "proxy-al-src-ext-ip",    srv_parse_proxy_al_src_ext_ip,    1,  1,  1 }, /* Set AGENTLESS PROXY src_ext_ip */
+	{ "forward-proxy",          srv_parse_forward_proxy,          1,  1,  1 }, /* This server is a forward proxy */
 
 	{ NULL, NULL, 0 },
 }};
@@ -2244,6 +2283,9 @@ void srv_settings_cpy(struct server *srv, const struct server *src, int srv_tmpl
 	/* Agentless settings copy */
 	agentless_pp_settings_cpy(&srv->pp_al, &src->pp_al);
 
+	if (src->forward_proxy_var_name != NULL)
+		srv->forward_proxy_var_name = strdup(src->forward_proxy_var_name);
+
 	if (srv_tmpl) {
 		srv->addr = src->addr;
 		srv->svc_port = src->svc_port;
@@ -2446,6 +2488,7 @@ struct server *srv_drop(struct server *srv)
 	task_destroy(srv->srvrq_check);
 
 	agentless_pp_settings_drop(&srv->pp_al);
+	free(srv->forward_proxy_var_name);
 
 	free(srv->id);
 	free(srv->cookie);
