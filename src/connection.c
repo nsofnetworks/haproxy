@@ -10,6 +10,8 @@
  *
  */
 
+#define _GNU_SOURCE  /* for memmem */
+
 #include <errno.h>
 
 #include <import/ebmbtree.h>
@@ -32,6 +34,7 @@
 #include <haproxy/stconn.h>
 #include <haproxy/tools.h>
 #include <haproxy/xxhash.h>
+#include <haproxy/vars.h>
 
 
 DECLARE_POOL(pool_head_connection,     "connection",     sizeof(struct connection));
@@ -642,6 +645,10 @@ const char *conn_err_code_str(struct connection *c)
 	case CO_ER_SOCKS4_DENY:    return "SOCKS4 Proxy deny the request";
 	case CO_ER_SOCKS4_ABORT:   return "SOCKS4 Proxy handshake aborted by server";
 
+	case CO_ER_FORWARD_PROXY_SEND: return "Forward Proxy write error during handshake";
+	case CO_ER_FORWARD_PROXY_RECV: return "Forward Proxy read error during handshake";
+	case CO_ER_FORWARD_PROXY_VAR: return "Forward Proxy failed to fetch SNI from variable";
+
 	case CO_ERR_SSL_FATAL:     return "SSL fatal error";
 	}
 	return NULL;
@@ -1235,6 +1242,16 @@ int conn_send_proxy(struct connection *conn, unsigned int flag)
 	 */
 	conn->flags &= ~CO_FL_WAIT_L4_CONN;
 	conn->flags &= ~flag;
+
+	if (conn->flags & CO_FL_FORWARD_PROXY_SEND) {
+		/*
+		 * Get the send_proxy_ofs ready for the send_forward_proxy due to we are
+		 * reusing the "send_proxy_ofs", and PROXY Protocol header should be
+		 * sent before sending HTTP CONNECT.
+		 */
+		conn->send_proxy_ofs = 1;
+	}
+
 	return 1;
 
  out_error:
@@ -1642,6 +1659,272 @@ int conn_recv_socks4_proxy_response(struct connection *conn)
 	if (conn->err_code == CO_ER_NONE) {
 		conn->err_code = CO_ER_SOCKS4_ABORT;
 	}
+	conn->flags |= (CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH);
+	goto fail;
+
+ fail:
+	conn->flags |= CO_FL_ERROR;
+	return 0;
+}
+
+static int build_forward_proxy_request(const char *hostname,
+                                       const struct sockaddr_storage *dst,
+                                       char *buf, size_t buf_len)
+{
+	int ret = 0;
+	int port = 0;
+
+	if (!dst)
+		goto fail;
+
+	port = get_host_port(dst);
+	if (!port)
+		goto fail;
+
+	ret = snprintf(buf, buf_len,
+		"CONNECT %s:%d HTTP/1.1\r\n\r\n", hostname, port);
+
+	if (ret < 0 || (size_t)ret >= buf_len)
+		goto fail;
+
+	return ret;
+
+ fail:
+	return -1;
+}
+
+int conn_send_forward_proxy_request(struct connection *conn)
+{
+	const struct sockaddr_storage *dst = NULL;
+	const struct server *srv = NULL;
+	const struct stream *strm = NULL;
+	const struct stconn *sc = NULL;
+	struct session *sess = NULL;
+	const char *fp_var_name = NULL;
+	struct sample smp;
+	int len = 0;
+
+	if (!conn_ctrl_ready(conn))
+		goto out_error;
+
+	srv = objt_server(conn->target);
+	if (!srv) {
+		ha_warning("could not determine connection's server\n");
+		goto out_error;
+	}
+
+	sc = conn->mux ? conn_get_first_sc(conn) : conn->ctx;
+
+	strm = sc ? sc_strm(sc) : NULL;
+	if (!strm) {
+		ha_warning("could not determine connection's stream\n");
+		goto out_error;
+	}
+
+	sess = strm_sess(strm);
+	if (!sess) {
+		ha_warning("could not determine stream's session\n");
+		goto out_error;
+	}
+
+	dst = strm ? sc_dst(strm->scf) : NULL;
+	if (!dst) {
+		ha_warning("could not determine stream's destination address\n");
+		goto out_error;
+	}
+
+	fp_var_name = srv->forward_proxy_var_name;
+	smp_set_owner(&smp, NULL, sess, NULL, 0);
+
+	if (!vars_get_by_name(fp_var_name, strlen(fp_var_name), &smp, NULL)) {
+		ha_notice("could not find SNI variable value: %s\n", fp_var_name);
+		goto var_error;
+	}
+
+	if (!smp_is_safe(&smp) || smp.data.type != SMP_T_STR) {
+		ha_notice("invalid SNI variable value: type %d\n", smp.data.type);
+		goto var_error;
+	}
+
+	len = build_forward_proxy_request(smp.data.u.str.area,
+		dst, trash.area, trash.size);
+	if (len < 0) {
+		ha_warning("failed to build forward proxy request\n");
+		goto out_error;
+	}
+
+	if (conn->send_proxy_ofs > 0) {
+		/*
+		 * This is the first call to send the request
+		 */
+		conn->send_proxy_ofs = -len;
+	}
+
+	if (conn->send_proxy_ofs < 0) {
+		int ret = 0;
+		int flags = (conn->subs &&
+			conn->subs->events & SUB_RETRY_SEND) ? CO_SFL_MSG_MORE : 0;
+
+		ret = conn_ctrl_send(
+			conn,
+			trash.area + len + conn->send_proxy_ofs,
+			-conn->send_proxy_ofs,
+			flags
+		);
+
+		if (ret < 0)
+			goto out_error;
+
+		conn->send_proxy_ofs += ret;
+
+		if (conn->send_proxy_ofs != 0)
+			goto out_wait;
+
+	}
+
+	/* We have sent the whole CONNECT line */
+	conn->flags &= ~CO_FL_FORWARD_PROXY_SEND;
+
+	/* The connection is ready now, simply return and let the connection
+	 * handler notify upper layers if needed.
+	 */
+	conn->flags &= ~CO_FL_WAIT_L4_CONN;
+
+	return 1;
+
+ var_error:
+	conn->flags |= CO_FL_ERROR;
+	if (conn->err_code == CO_ER_NONE)
+		conn->err_code = CO_ER_FORWARD_PROXY_VAR;
+	return 0;
+
+ out_error:
+	/* Write error on the file descriptor */
+	conn->flags |= CO_FL_ERROR;
+	if (conn->err_code == CO_ER_NONE)
+		conn->err_code = CO_ER_FORWARD_PROXY_SEND;
+	return 0;
+
+ out_wait:
+	return 0;
+}
+
+static int parse_forward_proxy_response(struct connection *conn)
+{
+	static const char prefix[] = "HTTP/1.1 200 ";
+	const int prefix_len = sizeof(prefix) - 1; /* exclude terminating null */
+
+	/* have we received a full response? */
+	if (!memmem(trash.area, trash.data, "\r\n\r\n", 4)) {
+		if (trash.data >= trash.size - 1) {
+			/* the buffer is full and no empty line - a retry won't help */
+			goto fail;
+		}
+		goto not_ready;
+	}
+
+	/* is it an OK response? */
+	if (trash.data < prefix_len) {
+		ha_notice("connect status line too short: %lu\n", trash.data);
+		goto fail;
+
+	}
+	if (memcmp(trash.area, prefix, prefix_len)) {
+		trash.area[trash.data] = 0;
+		ha_notice("unepxected connect status line: %s\n", trash.area);
+		goto fail;
+	}
+
+	/* success */
+	return 1;
+
+ not_ready:
+	return 2;
+
+ fail:
+	return 0;
+}
+
+int conn_recv_forward_proxy_response(struct connection *conn)
+{
+	int len = 0;
+
+	if (!conn_ctrl_ready(conn))
+		goto fail;
+
+	BUG_ON(conn->flags & CO_FL_FDLESS);
+
+	if (!fd_recv_ready(conn->handle.fd))
+		goto not_ready;
+
+	/* peek the received data to see if we have a complete response */
+	while (1) {
+		len = recv(conn->handle.fd, trash.area, trash.size - 1, MSG_PEEK);
+
+		if (len > 0) {
+			trash.data = (size_t)len;
+
+			switch (parse_forward_proxy_response(conn)) {
+			case 2:
+				goto not_ready;
+			case 1:
+				break;
+			default:
+				if (conn->err_code == CO_ER_NONE)
+					conn->err_code = CO_ER_FORWARD_PROXY_RECV;
+				goto fail;
+			}
+		}
+
+		if (len == 0) {
+			/* the socket has been closed or shutdown for send */
+			if (conn->err_code == CO_ER_NONE)
+				conn->err_code = CO_ER_FORWARD_PROXY_RECV;
+			goto fail;
+		}
+
+		if (len < 0) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				fd_cant_recv(conn->handle.fd);
+				goto not_ready;
+			}
+			goto recv_abort;
+		}
+
+		break;
+	}
+
+	/* remove the response from the stream */
+	while (1) {
+		int ret;
+
+		ret = recv(conn->handle.fd, trash.area, len, 0);
+		if (ret < 0 && errno == EINTR)
+			continue;
+		if (ret != len) {
+			if (conn->err_code == CO_ER_NONE)
+				conn->err_code = CO_ER_FORWARD_PROXY_RECV;
+			goto fail;
+		}
+		break;
+	}
+
+	/* the connection is ready now */
+	conn->flags &= ~CO_FL_WAIT_L4_CONN;
+
+	/* We have received an OK response and cleared it from the stream */
+	conn->flags &= ~CO_FL_FORWARD_PROXY_RECV;
+
+	return 1;
+
+ not_ready:
+	return 0;
+
+ recv_abort:
+	if (conn->err_code == CO_ER_NONE)
+		conn->err_code = CO_ER_FORWARD_PROXY_RECV;
 	conn->flags |= (CO_FL_SOCK_RD_SH | CO_FL_SOCK_WR_SH);
 	goto fail;
 

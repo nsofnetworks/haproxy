@@ -213,6 +213,10 @@ enum {
 	CO_ER_SOCKS4_DENY,       /* SOCKS4 Proxy deny the request */
 	CO_ER_SOCKS4_ABORT,      /* SOCKS4 Proxy handshake aborted by server */
 
+	CO_ER_FORWARD_PROXY_SEND,   /* failed to send forward proxy request */
+	CO_ER_FORWARD_PROXY_RECV,   /* failed to receive forward proxy response */
+	CO_ER_FORWARD_PROXY_VAR,    /* failed to fetch SNI from variable */
+
 	CO_ERR_SSL_FATAL,        /* SSL fatal error during a SSL_read or SSL_write */
 };
 
