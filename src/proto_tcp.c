@@ -646,6 +646,14 @@ int tcp_bind_listener(struct listener *listener, char *errmsg, int errlen)
 		}
 	}
 #endif
+#ifdef IP_TOS
+	if (listener->tos > 0) {
+		if (setsockopt(fd, IPPROTO_IP, IP_TOS, &listener->tos, sizeof(listener->tos)) == -1) {
+			chunk_appendf(msg, "%scannot set TOS to %d", msg->data ? ", " : "", listener->tos);
+			err |= ERR_WARN;
+		}
+	}
+#endif
 #if defined(TCP_USER_TIMEOUT)
 	if (listener->tcp_ut) {
 		if (setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT,
