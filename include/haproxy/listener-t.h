@@ -239,6 +239,7 @@ struct listener {
 	unsigned int analysers;		/* bitmap of required protocol analysers */
 	int maxseg;			/* for TCP, advertised MSS */
 	int tcp_ut;                     /* for TCP, user timeout */
+	int tos;			/* listening socket TOS */
 	char *name;			/* listener's name */
 
 	/* cache line boundary */

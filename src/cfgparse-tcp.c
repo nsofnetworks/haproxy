@@ -229,6 +229,39 @@ static int srv_parse_tcp_ut(char **args, int *cur_arg, struct proxy *px, struct 
 }
 #endif
 
+#ifdef IP_TOS
+/* parse the "tos" bind keyword */
+static int bind_parse_tos(char **args, int cur_arg, struct proxy *px, struct bind_conf *conf, char **err)
+{
+	struct listener *l;
+	char *endp;
+	int tos;
+
+	if (!*args[cur_arg + 1]) {
+		memprintf(err, "'%s' : missing TOS value", args[cur_arg]);
+		return ERR_ALERT | ERR_FATAL;
+	}
+
+	tos = strtol(args[cur_arg + 1], &endp, 0);
+	if (endp && *endp != '\0') {
+		memprintf(err, "invalid character starting at '%s' (integer/hex value expected)", endp);
+		return ERR_ALERT | ERR_FATAL;
+	}
+
+	if (tos < 1 || tos > 255) {
+		memprintf(err, "'%s' : expects a TOS value with a value between 1 and 255", args[cur_arg + 1]);
+		return ERR_ALERT | ERR_FATAL;
+	}
+
+	list_for_each_entry(l, &conf->listeners, by_bind) {
+		if (l->rx.addr.ss_family == AF_INET)
+			l->tos = tos;
+	}
+
+	return 0;
+}
+#endif
+
 
 /************************************************************************/
 /*           All supported bind keywords must be declared here.         */
@@ -260,6 +293,9 @@ static struct bind_kw_list bind_kws = { "TCP", { }, {
 #ifdef CONFIG_HAP_TRANSPARENT
 	{ "transparent",   bind_parse_transparent,  0 }, /* transparently bind to the specified addresses */
 #endif
+#ifdef IP_TOS
+	{ "tos",           bind_parse_tos,          1 }, /* set TOS of listening socket */
+#endif
 #ifdef IPV6_V6ONLY
 	{ "v4v6",          bind_parse_v4v6,         0 }, /* force socket to bind to IPv4+IPv6 */
 	{ "v6only",        bind_parse_v6only,       0 }, /* force socket to bind to IPv6 only */
@@ -272,6 +308,7 @@ static struct bind_kw_list bind_kws = { "TCP", { }, {
 	{ "interface",     NULL,  1 },
 	{ "mss",           NULL,  1 },
 	{ "transparent",   NULL,  0 },
+	{ "tos",           NULL,  1 },
 	{ "v4v6",          NULL,  0 },
 	{ "v6only",        NULL,  0 },
 	{ NULL, NULL, 0 },
