@@ -262,6 +262,33 @@ static int bind_parse_tos(char **args, int cur_arg, struct proxy *px, struct bin
 }
 #endif
 
+#ifdef SO_MARK
+/* parse the "mark" bind keyword */
+static int bind_parse_mark(char **args, int cur_arg, struct proxy *px, struct bind_conf *conf, char **err)
+{
+	struct listener *l;
+	char *endp;
+	unsigned int mark;
+
+	if (!*args[cur_arg + 1]) {
+		memprintf(err, "'%s' : missing MARK value", args[cur_arg]);
+		return ERR_ALERT | ERR_FATAL;
+	}
+
+	mark = strtoul(args[cur_arg + 1], &endp, 0);
+	if (endp && *endp != '\0') {
+		memprintf(err, "invalid character starting at '%s' (integer/hex value expected)", endp);
+		return ERR_ALERT | ERR_FATAL;
+	}
+
+	list_for_each_entry(l, &conf->listeners, by_bind) {
+		l->mark = mark;
+	}
+
+	return 0;
+}
+#endif
+
 
 /************************************************************************/
 /*           All supported bind keywords must be declared here.         */
@@ -280,6 +307,9 @@ static struct bind_kw_list bind_kws = { "TCP", { }, {
 #endif
 #ifdef SO_BINDTODEVICE
 	{ "interface",     bind_parse_interface,    1 }, /* specifically bind to this interface */
+#endif
+#ifdef SO_MARK
+	{ "mark",          bind_parse_mark,         1 }, /* set MARK of listening socket */
 #endif
 #ifdef TCP_MAXSEG
 	{ "mss",           bind_parse_mss,          1 }, /* set MSS of listening socket */
@@ -306,6 +336,7 @@ static struct bind_kw_list bind_kws = { "TCP", { }, {
 	/* the versions with the NULL parse function*/
 	{ "defer-accept",  NULL,  0 },
 	{ "interface",     NULL,  1 },
+	{ "mark",          NULL,  1 },
 	{ "mss",           NULL,  1 },
 	{ "transparent",   NULL,  0 },
 	{ "tos",           NULL,  1 },

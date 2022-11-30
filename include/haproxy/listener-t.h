@@ -240,6 +240,7 @@ struct listener {
 	int maxseg;			/* for TCP, advertised MSS */
 	int tcp_ut;                     /* for TCP, user timeout */
 	int tos;			/* listening socket TOS */
+	unsigned int mark;	        /* listening socket MARK */
 	char *name;			/* listener's name */
 
 	/* cache line boundary */
