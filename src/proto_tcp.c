@@ -654,6 +654,14 @@ int tcp_bind_listener(struct listener *listener, char *errmsg, int errlen)
 		}
 	}
 #endif
+#ifdef SO_MARK
+	if (listener->mark > 0) {
+		if (setsockopt(fd, SOL_SOCKET, SO_MARK, &listener->mark, sizeof(listener->mark)) == -1) {
+			chunk_appendf(msg, "%scannot set MARK to %d", msg->data ? ", " : "", listener->mark);
+			err |= ERR_WARN;
+		}
+	}
+#endif
 #if defined(TCP_USER_TIMEOUT)
 	if (listener->tcp_ut) {
 		if (setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT,
